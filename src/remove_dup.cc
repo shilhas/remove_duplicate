@@ -21,13 +21,21 @@
 #include <iostream>
 #include <algorithm>
 #include <thread>
+// #include <future>
 
 namespace fs = std::filesystem;
 
+#define FIND_DUP_BUFF_SIZE 4000000u//64510
+
 FindDup::FindDup():max_count(5000), max_depth(100), recursive(false), thread_count(1){}
     
-FindDup::FindDup(int max_cnt, int max_depth, bool recurse, int thread_count):
-    max_count(max_cnt), max_depth(max_depth), recursive(recurse), thread_count(thread_count){}
+FindDup::FindDup(int max_cnt, int max_depth, bool recurse, int thread_count, bool show_dup, bool verbose):
+    max_count(max_cnt), 
+    max_depth(max_depth), 
+    recursive(recurse), 
+    thread_count(thread_count), 
+    show_dup(show_dup), 
+    verbose(verbose){}
 
 FindDup_Result_t FindDup::delDup() {
     return FindDup_Result_t::SUCCESS;
@@ -54,7 +62,7 @@ std::string FindDup::CalculateSha(FindDup_path& fpath) {
 
 
     // Buffer
-    const int buf_size = 4096;
+    const int buf_size = FIND_DUP_BUFF_SIZE;
     std::vector<char>buf(buf_size);
 
     while (rf.read(buf.data(), buf_size)) {
@@ -112,6 +120,9 @@ FindDup_Result_t FindDup::listDup(FindDup_path& dirPath) {
                 } else {
                     // it is a file
                     FindDup_path f_path = next.path();
+                    if (this->verbose) {
+                        std::cout << "Processing:" << f_path << "\n";
+                    }
                     std::string f_hash = this->CalculateSha(f_path);
                     if (f_hash == "") {
                         return FindDup_Result_t::FAILED;

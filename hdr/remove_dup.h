@@ -19,10 +19,12 @@ class FindDup{
     int max_depth;
     int thread_count;
     bool recursive;
+    bool show_dup;
+    bool verbose;
 public:
     FindDup();
     
-    FindDup(int max_cnt, int max_depth, bool recurse, int thread_count);
+    FindDup(int max_cnt, int max_depth, bool recurse, int thread_count, bool show_dup, bool verbose);
 
     FindDup_Result_t listDup(FindDup_path& dirPath);
     FindDup_Result_t delDup();
