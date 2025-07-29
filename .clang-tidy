@@ -1,0 +1,12 @@
+# .clang-tidy (in your project root)
+Checks: '-*,
+  clang-analyzer-core.CallAndMessage,
+  clang-analyzer-core.DivideByZero,
+  clang-analyzer-core.NullDereference,
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  google-*'
+WarningsAsErrors: 'bugprone-*,cppcoreguidelines-*'
+HeaderFilterRegex: '.*(remove_duplicate|src|include)/.*'
+FormatStyle: file

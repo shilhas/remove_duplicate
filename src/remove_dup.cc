@@ -21,7 +21,7 @@
 #include <iostream>
 #include <algorithm>
 #include <thread>
-// #include <future>
+#include <future>
 
 namespace fs = std::filesystem;
 
@@ -41,46 +41,66 @@ FindDup_Result_t FindDup::delDup() {
     return FindDup_Result_t::SUCCESS;
 }
 
-std::string FindDup::CalculateSha(FindDup_path& fpath) {
+static std::string CalculateSha(FindDup_path fpath) {
+    // Open file in binary mode
     std::ifstream rf(fpath, std::ios::binary);
-    if(!rf.is_open()) {
-        // Unable to open file
+    if (!rf.is_open()) {
         std::cerr << "Unable to open file " << fpath << std::endl;
         return "";
     }
-    EVP_MD_CTX *mdctx;
 
-    if((mdctx = EVP_MD_CTX_new()) == NULL) {
+    // Initialize OpenSSL context
+    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+    if (!mdctx) {
         std::cerr << "OpenSSL context creation error!!" << std::endl;
         return "";
     }
 
-    if(1 != EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL)){
+    if (EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) != 1) {
         std::cerr << "OpenSSL INIT error!!" << std::endl;
+        EVP_MD_CTX_free(mdctx);
         return "";
     }
 
+    // Buffer for reading file
+    constexpr int buf_size = FIND_DUP_BUFF_SIZE; // Ensure FIND_DUP_BUFF_SIZE is defined
+    std::vector<char> buf(buf_size);
 
-    // Buffer
-    const int buf_size = FIND_DUP_BUFF_SIZE;
-    std::vector<char>buf(buf_size);
-
-    while (rf.read(buf.data(), buf_size)) {
-        if (1 != EVP_DigestUpdate(mdctx, buf.data(), rf.gcount())) {
-            std::cerr << "Error computing SHA256!!\n" ;
+    // Read file in chunks
+    while (rf.good()) {
+        rf.read(buf.data(), buf_size);
+        std::streamsize bytes_read = rf.gcount();
+        if (bytes_read > 0) {
+            if (EVP_DigestUpdate(mdctx, buf.data(), bytes_read) != 1) {
+                std::cerr << "Error computing SHA256 for " << fpath << std::endl;
+                EVP_MD_CTX_free(mdctx);
+                return "";
+            }
         }
     }
-    if (1 != EVP_DigestUpdate(mdctx, buf.data(), rf.gcount())) {
-        std::cerr << "Error computing SHA256!!\n" ;
-    }
-    unsigned int sha_len = 32;
 
-    unsigned char hash[sha_len];
-    EVP_DigestFinal_ex(mdctx, hash, &sha_len);
+    // Check for read errors
+    if (rf.bad()) {
+        std::cerr << "Error reading file " << fpath << std::endl;
+        EVP_MD_CTX_free(mdctx);
+        return "";
+    }
+
+    // Finalize hash
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int sha_len = 0;
+    if (EVP_DigestFinal_ex(mdctx, hash, &sha_len) != 1) {
+        std::cerr << "Error finalizing SHA256 for " << fpath << std::endl;
+        EVP_MD_CTX_free(mdctx);
+        return "";
+    }
     EVP_MD_CTX_free(mdctx);
+
+    // Convert hash to hex string
     std::ostringstream ss;
-    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    ss << std::hex << std::setfill('0');
+    for (unsigned int i = 0; i < sha_len; ++i) {
+        ss << std::setw(2) << static_cast<int>(hash[i]);
     }
     return ss.str();
 }
@@ -103,6 +123,19 @@ void FindDup::print_dups() {
     }
 }
 
+#if 0
+static void get_hashes(std::vector<std::pair<FindDup_path,std::future<std::string>>> fu_hashes) {
+    for (auto fu_h: fu_hashes) {
+        std::string f_hash = fu_h.second.get();
+        if (f_hash == "") {
+            return FindDup_Result_t::FAILED;
+        }
+        this->duplist[f_hash].push_back(fu_h.first);
+    }
+    fu_hashes = {};
+}
+#endif
+
 FindDup_Result_t FindDup::listDup(FindDup_path& dirPath) {
     // upto specified depth in the target directory search for duplicates
     std::queue<FindDup_path>dir_queue;
@@ -114,7 +147,8 @@ FindDup_Result_t FindDup::listDup(FindDup_path& dirPath) {
         for (int i = 0; i < cur_queue_size; ++i) {
             FindDup_path cur_path = dir_queue.front();
             dir_queue.pop();
-            for (const auto next: fs::directory_iterator(cur_path)) {
+            std::vector<std::pair<FindDup_path,std::future<std::string>>> fu_hashes;
+            for (const auto next: fs::directory_iterator(cur_path)) {                
                 if (fs::is_directory(next)) {
                     next_dir_queue.push(next);
                 } else {
@@ -123,12 +157,34 @@ FindDup_Result_t FindDup::listDup(FindDup_path& dirPath) {
                     if (this->verbose) {
                         std::cout << "Processing:" << f_path << "\n";
                     }
-                    std::string f_hash = this->CalculateSha(f_path);
+                    // std::string f_hash = this->CalculateSha(f_path);
+                    std::future<std::string> fu_hash = std::async(CalculateSha, f_path);
+                    fu_hashes.push_back(make_pair(f_path,std::move(fu_hash)));
+                }
+                if (fu_hashes.size() >= this->thread_count) {
+                    // get_hashes(std::move(fu_hashes))
+                    for (int i = 0; i < fu_hashes.size(); i++) {
+                        std::pair<FindDup_path,std::future<std::string>> fu_h = std::move(fu_hashes[i]);
+                        std::string f_hash = fu_h.second.get();
+                        if (f_hash == "") {
+                            return FindDup_Result_t::FAILED;
+                        }
+                        this->duplist[f_hash].push_back(fu_h.first);
+                    }
+                    fu_hashes.clear();
+                }
+            }
+            if (!fu_hashes.empty()) {
+                // get_hashes(std::move(fu_hashes))
+                for (int i = 0; i < fu_hashes.size(); i++) {
+                    std::pair<FindDup_path,std::future<std::string>> fu_h = std::move(fu_hashes[i]);
+                    std::string f_hash = fu_h.second.get();
                     if (f_hash == "") {
                         return FindDup_Result_t::FAILED;
                     }
-                    this->duplist[f_hash].push_back(f_path);
+                    this->duplist[f_hash].push_back(fu_h.first);
                 }
+                fu_hashes.clear();
             }
         }
         dir_queue = std::move(next_dir_queue);
@@ -206,5 +262,4 @@ FindDup_Result_t FindDup::set_max_count(int max_count) {
     this->max_count = max_count;
     return FindDup_Result_t::SUCCESS;
 }
-
 

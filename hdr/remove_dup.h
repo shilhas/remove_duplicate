@@ -36,7 +36,7 @@ public:
     FindDup_Result_t set_recursive(bool recurse);
 
 private:
-    std::string CalculateSha(FindDup_path& fpath);
+    // static std::string CalculateSha(FindDup_path& fpath);
     void print_dups();
     FindDup_Result_t get_filename_ext(std::string& fn, 
                                                std::pair<std::string,std::string>& res);

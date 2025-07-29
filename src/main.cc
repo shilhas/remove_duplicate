@@ -3,6 +3,26 @@
 #include <fstream>
 #include "remove_dup.h"
 #include "argparse/argparse.hpp"
+#include <openssl/opensslv.h>
+#include <openssl/crypto.h>
+
+void InitializeOpenSSL() {
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    // For OpenSSL < 1.1.0, set up thread callbacks
+    CRYPTO_set_locking_callback([](int mode, int type, const char*, int) {
+        static std::mutex mutexes[CRYPTO_NUM_LOCKS];
+        if (mode & CRYPTO_LOCK) {
+            mutexes[type].lock();
+        } else {
+            mutexes[type].unlock();
+        }
+    });
+    CRYPTO_set_id_callback([]() -> unsigned long {
+        return static_cast<unsigned long>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+    });
+#endif
+    // For OpenSSL >= 1.1.0, thread safety is built-in, no callbacks needed
+}
 
 /**
  * Application to find and remove duplicate file from a given directory
@@ -122,7 +142,7 @@ int main(int argc, char* argv[]) {
         args.show_list,
         args.verbose
     );
-
+    InitializeOpenSSL();
     FindDup_path search_dir{args.dir_path};
     std::cout << "Searching in directory: "<< args.dir_path << std::endl;
     find_dup->listDup(search_dir);
