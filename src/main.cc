@@ -44,10 +44,10 @@ void InitializeOpenSSL() {
     int threads;
     int depth;
     bool recursive;
-    bool show_list;
     bool del_duplicates;
     bool verbose;
     bool move;
+    bool stat;
 }Arguments_t;
 
 #ifdef DEBUG
@@ -60,7 +60,7 @@ void print_out_args (Arguments_t &arg) {
     } else {
         std::cout << "Recursive search not enabled" << std::endl;
     }
-    if (arg.show_list) std::cout << "List found duplicates" << std::endl;
+    if (arg.stat) std::cout << "Print statistical information" << std::endl;
     if (arg.del_duplicates) std::cout << "Delete found duplicates" << std::endl;
     std::cout << "Use " << arg.threads << " threads" << std::endl;
     if (arg.move_dir != "") std::cout << "Move found duplicates to :" << arg.move_dir << std::endl;
@@ -89,16 +89,16 @@ int main(int argc, char* argv[]) {
         .implicit_value(true)
         .store_into(args.recursive);
 
+    app.add_argument("--stat")
+        .help("After completion provide stats")
+        .default_value(false)
+        .implicit_value(true)
+        .store_into(args.stat);
+
     app.add_argument("--depth")
         .help("Specifies max depth incase of recursive search default is 20")
         .default_value(int{20})
         .store_into(args.depth);
-    
-    app.add_argument("-l","--list")
-        .help("List all found duplicates")
-        .default_value(false)
-        .implicit_value(true)
-        .store_into(args.show_list);
 
     app.add_argument("--del")
         .help("Delete all but one")
@@ -139,7 +139,7 @@ int main(int argc, char* argv[]) {
         args.depth,
         args.recursive,
         args.threads,
-        args.show_list,
+        args.stat,
         args.verbose
     );
     InitializeOpenSSL();

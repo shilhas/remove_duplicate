@@ -22,20 +22,26 @@
 #include <algorithm>
 #include <thread>
 #include <future>
+#include <boost/format.hpp>
 
 namespace fs = std::filesystem;
 
-#define FIND_DUP_BUFF_SIZE 4000000u//64510
+#define FIND_DUP_BUFF_SIZE 2000000u
 
 FindDup::FindDup():max_count(5000), max_depth(100), recursive(false), thread_count(1){}
     
-FindDup::FindDup(int max_cnt, int max_depth, bool recurse, int thread_count, bool show_dup, bool verbose):
+FindDup::FindDup(int max_cnt, int max_depth, bool recurse, int thread_count, bool show_stat, bool verbose):
     max_count(max_cnt), 
     max_depth(max_depth), 
     recursive(recurse), 
-    thread_count(thread_count), 
-    show_dup(show_dup), 
-    verbose(verbose){}
+    thread_count(thread_count),
+    stat(show_stat),
+    verbose(verbose),
+    scanned_size(0),
+    dup_size(0),
+    files_parsed(0),
+    duplicate_count(0),
+    duplicate_abs_count(0){}
 
 FindDup_Result_t FindDup::delDup() {
     return FindDup_Result_t::SUCCESS;
@@ -105,21 +111,42 @@ static std::string CalculateSha(FindDup_path fpath) {
     return ss.str();
 }
 
+void FindDup::print_stats() {
+    /**
+     * things to print: scanned_size, dup_size, files_parsed, duplicate_count, duplicate_abs_count, 
+     */
+    std::cout << "\n/////////////////////////// Stats ///////////////////////////\n";
+    std::cout << boost::format("%-24s: %llu\n")  % "Total files parsed " % this->files_parsed;
+    std::cout << boost::format("%-24s: %llu bytes\n")  % "Scanned size " % this->scanned_size;
+    std::cout << boost::format("%-24s: %llu\n")  % "Duplicate file count " % this->duplicate_count;
+    std::cout << boost::format("%-24s: %llu\n")  % "Total Duplicate files " % this->duplicate_abs_count;
+    std::cout << boost::format("%-24s: %llu bytes\n")  % "Duplicate size " % this->dup_size;
+}
+
 void FindDup::print_dups() {
     bool found = false;
     for (auto fileList: this->duplist) {
         std::vector<FindDup_path> files = this->duplist[fileList.first];
         if (files.size() > 1) {
+            // duplicate found, add to stats
+            this->duplicate_count++;
+            // total duplicates = count - 1; since one is considered original
+            this->duplicate_abs_count += files.size() - 1;
             found = true;
             std::cout << "Duplicate for file: " << files[0] << ":\n";
             for (int i = 1; i < files.size(); i++) {
                 std::cout << "\t" << files[i]<<std::endl;
+                // update stat: increment the found duplicate
+                this->dup_size += fs::file_size(files[i]);
             }
             std::cout << "\n";
         }
     }
     if (!found) {
         std::cout << "No Duplicates found\n";
+    }
+    if (this->stat) {
+        this->print_stats();
     }
 }
 
@@ -148,16 +175,19 @@ FindDup_Result_t FindDup::listDup(FindDup_path& dirPath) {
             FindDup_path cur_path = dir_queue.front();
             dir_queue.pop();
             std::vector<std::pair<FindDup_path,std::future<std::string>>> fu_hashes;
-            for (const auto next: fs::directory_iterator(cur_path)) {                
+            for (const auto next: fs::directory_iterator(cur_path, fs::directory_options::skip_permission_denied)) {
                 if (fs::is_directory(next)) {
                     next_dir_queue.push(next);
                 } else {
                     // it is a file
+                    // update stats
+                    this->files_parsed++;
+                    this->scanned_size += fs::file_size(next);
                     FindDup_path f_path = next.path();
                     if (this->verbose) {
                         std::cout << "Processing:" << f_path << "\n";
                     }
-                    // std::string f_hash = this->CalculateSha(f_path);
+                    
                     std::future<std::string> fu_hash = std::async(CalculateSha, f_path);
                     fu_hashes.push_back(make_pair(f_path,std::move(fu_hash)));
                 }
